@@ -7,6 +7,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Maven 坐标由 `zcd` 改为 `io.github.zcd0831`，版本号 0.1.1；内核与 starter 由本地仓库依赖改为从
+  Maven Central 解析（`jellyfish.version` 0.1.1），只在本地改了内核时才需要先 `install`。
+
 ## [0.1.0] - 2026-10-07
 
 ### Added
