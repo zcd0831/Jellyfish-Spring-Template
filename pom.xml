@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>2.7.18</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>zcd</groupId>
+    <artifactId>jellyfish-spring-template</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>Jellyfish Spring Template</name>
+    <description>Jellyfish Spring Boot Starter 的示例项目：一个 Spring Boot 2.7 / Java 8 应用，用三个接口演示建会话、同步提问与流式提问。</description>
+
+    <properties>
+        <java.version>1.8</java.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!-- 内核与 starter 都还没发 release，开发期靠本地仓库的 SNAPSHOT。用之前先两边各装一次：
+             (cd ../Jellyfish && mvn -q install -DskipTests)
+             (cd ../Jellyfish-Spring-Boot-Starter && mvn -q install -DskipTests) -->
+        <jellyfish.version>0.0.1-SNAPSHOT</jellyfish.version>
+
+        <!-- 把 Jackson 对齐到内核 / starter 构建所用的那一份（内核 pom 的 jackson.version）。
+             Boot 2.7.18 默认管 2.13.5，与内核差一个大版本。宿主应用的最终 classpath 由宿主自己的 BOM
+             决定，因此这里就是那个「由宿主决定」的地方：想让本示例跑在与 starter 测试相同的版本上，
+             就保持这一行；不想管，删掉它，Boot 管的 2.13.5 也能跑（starter README 有实测说明）。 -->
+        <jackson-bom.version>2.21.6</jackson-bom.version>
+    </properties>
+
+    <dependencies>
+        <!-- Web 栈由接入方自己选，starter 刻意不带它，接口也由接入方自己写 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- 本示例的主角：一个自动配置 + 一组门面 Bean -->
+        <dependency>
+            <groupId>zcd</groupId>
+            <artifactId>jellyfish-spring-boot-starter</artifactId>
+            <version>${jellyfish.version}</version>
+        </dependency>
+
+        <!-- 启动验证用：MockMvc / TestRestTemplate / JUnit5 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- mvn package 产出可执行 jar：java -jar target/jellyfish-spring-template-0.0.1-SNAPSHOT.jar -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -1,0 +1,8 @@
+{
+  "agents": {
+    "brief": {
+      "description": "只回答结论的极简助手（示例 agent）",
+      "permissions": {}
+    }
+  }
+}
