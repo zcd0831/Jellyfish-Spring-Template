@@ -14,7 +14,7 @@
 
     <groupId>zcd</groupId>
     <artifactId>jellyfish-spring-template</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>0.1.0</version>
     <name>Jellyfish Spring Template</name>
     <description>Jellyfish Spring Boot Starter 的示例项目：一个 Spring Boot 2.7 / Java 8 应用，用三个接口演示建会话、同步提问与流式提问。</description>
 
@@ -22,10 +22,10 @@
         <java.version>1.8</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-        <!-- 内核与 starter 都还没发 release，开发期靠本地仓库的 SNAPSHOT。用之前先两边各装一次：
+        <!-- 内核与 starter 都还没发布到中央仓库，用之前先两边各装一次：
              (cd ../Jellyfish && mvn -q install -DskipTests)
              (cd ../Jellyfish-Spring-Boot-Starter && mvn -q install -DskipTests) -->
-        <jellyfish.version>0.0.1-SNAPSHOT</jellyfish.version>
+        <jellyfish.version>0.1.0</jellyfish.version>
 
         <!-- 把 Jackson 对齐到内核 / starter 构建所用的那一份（内核 pom 的 jackson.version）。
              Boot 2.7.18 默认管 2.13.5，与内核差一个大版本。宿主应用的最终 classpath 由宿主自己的 BOM
@@ -58,7 +58,7 @@
 
     <build>
         <plugins>
-            <!-- mvn package 产出可执行 jar：java -jar target/jellyfish-spring-template-0.0.1-SNAPSHOT.jar -->
+            <!-- mvn package 产出可执行 jar：java -jar target/jellyfish-spring-template-0.1.0.jar -->
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>

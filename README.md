@@ -29,7 +29,7 @@
 | --- | --- |
 | JDK | 8 |
 | Spring Boot | 2.7（本仓库用 2.7.18） |
-| 内核与 starter | `0.0.1-SNAPSHOT`（**还没发 release**，得先装进本地仓库） |
+| 内核与 starter | `0.1.0`（**还没发布到中央仓库**，得先装进本地仓库） |
 
 **这一步不能省**，否则表现是「明明改了内核，这边编译却看不到」，或更糟——用到的是本地仓库里的旧快照：
 
@@ -182,7 +182,7 @@ jellyfish:
 ```bash
 mvn package        # 编译 + 跑 TemplateSmokeTest + 打出可执行 jar
 mvn test           # 只跑测试
-java -jar target/jellyfish-spring-template-0.0.1-SNAPSHOT.jar   # 跑打好的包
+java -jar target/jellyfish-spring-template-0.1.0.jar   # 跑打好的包
 ```
 
 `TemplateSmokeTest` 是**启动验证**：真 Web 容器 + 真内核 + 真 HTTP，验的是与模型无关、但一改就静默
