@@ -63,9 +63,14 @@ public class ChatController {
      * 建一个会话。
      * <p>
      * 会话建好后就绑在这个 {@code userId} 上，之后每次访问都会先校验归属。
+     * <p>
+     * <b>示例里 {@code userId} 与 {@code agentId} 都不做授权</b>：前者是客户端自报的（真实业务必须
+     * 从登录态取，见类注释），后者也只是原样交给内核——门面只校验「这个 agent 存在」，不问「这个用户
+     * 能不能用它」。接进真实业务时，后者同样要自己把关：用一个权限更宽的 agent 建会话，
+     * 等于绕过本用户原有的权限收窄。
      *
-     * @param userId  归属者标识，缺省 {@code demo}
-     * @param agentId 用哪个 agent，缺省 {@code null} 表示跟随内核的默认 agent
+     * @param userId  归属者标识，缺省 {@code demo}（示例简化，真实业务从登录态取）
+     * @param agentId 用哪个 agent，缺省 {@code null} 表示跟随内核的默认 agent；示例不校验用户能否用它
      * @return 新会话标识
      */
     @PostMapping
