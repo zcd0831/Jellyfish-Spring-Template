@@ -56,6 +56,9 @@ src/main/resources/
 └── jellyfish/{models,agents,jellyfish}.json + brief.md   # 仍是内核格式的内容（提示词是 {agentId}.md）
 
 src/test/java/zcd/jellyfish/template/TemplateSmokeTest.java   # 启动验证（真容器 + 真内核 + 真 HTTP）
+src/test/java/zcd/jellyfish/template/ApiExceptionMappingTest.java  # 异常 → 状态码的映射（真容器，探针端点抛异常）
+src/test/java/zcd/jellyfish/template/ChatControllerTest.java       # 同步接口的三条收尾路径（mock 门面）
+src/test/java/zcd/jellyfish/template/TurnCollectorTest.java        # 聚合语义与「终态回调恰好一次」
 src/test/java/zcd/jellyfish/template/SseTurnStreamTest.java    # 流写与断开发现（mock 掉 emitter 的单元测试）
 src/test/java/zcd/jellyfish/template/SseDisconnectTest.java    # 安静期断开的端到端验证（真容器 + 裸 socket）
 ```
@@ -80,6 +83,16 @@ src/test/java/zcd/jellyfish/template/SseDisconnectTest.java    # 安静期断开
   认错了会把一个刚答完的回合取消掉。因此先置 `finished` 再完成，且「放行」只允许发生一次。
 - **HTTP 200 ≠ 回合成功**：终态在响应体 / 终态帧的 `kind` 里（`COMPLETED` / `CANCELLED` / `ERROR` /
   `BLOCKED`）；`notice` 是内核的补充说明，不是正文，不要拼进 `reply`。
+- **同步接口用 `DeferredResult`，不阻塞容器线程**：容器线程提交完回合就释放，结果由终态事件回调交付
+  （`TurnCollector` 的 `onTerminal`）。**别改回「`await` 到回合结束」**：那会让一个在途请求占住一个
+  容器线程最长 5 分钟。相应地，谁的交付都必须过 `AtomicBoolean settled` 那道闸门，且
+  「正常交付之后的完成回调」不是「客户端跑了」——认错会把刚答完的回合取消掉。
+- **超时不是「一律取消」**：先看收集器里有没有终态（刚好收敛的回合要把结果交付出去，不能取消），
+  再决定是否 `cancel`。进程重启后没人重跑的那次推理是白花的 token。
+- **每一条异常都要显式映射**：漏一条就会落进兜底的 500，而 500 会让调用方去重试一个本来就错的请求。
+  `CommandNotAllowedException` 是曾经的漏网之鱼（403 才对），`ApiExceptionMappingTest` 现在守着这张表。
+- **「客户端断开」在同步接口上只是尽力而为**：容器在没有任何写出的安静期里通常不上报断开，
+  因此那条路上的 `onError` / `onCompletion` 只在容器真的发现时才生效。要「断开即释放」请用流式接口。
 - **配置分工不变**：yml 只回答「文件在哪」（四份配置文件路径 + 插件扫描目录），内容仍是内核格式的 JSON。
   **不去把 JSON 翻译成 yml**。
 - **示例的三段 `global-path` 保持空串**：不然示例会去读开发机上的 `~/.jellyfish/`，

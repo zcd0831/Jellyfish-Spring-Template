@@ -2,6 +2,7 @@ package zcd.jellyfish.template;
 
 import zcd.jellyfish.api.JellyfishException;
 import zcd.jellyfish.core.conversation.TurnInProgressException;
+import zcd.jellyfish.spring.boot.user.CommandNotAllowedException;
 import zcd.jellyfish.spring.boot.user.SessionAccessDeniedException;
 import zcd.jellyfish.spring.boot.user.UserQuotaExceededException;
 import zcd.jellyfish.template.api.ApiError;
@@ -26,6 +27,14 @@ import org.springframework.web.server.ResponseStatusException;
  * <p>
  * <b>异常消息不原样透出</b>：越权异常的消息里带着 {@code userId} 与 {@code sessionId}，那是服务端信息；
  * 兜底的 500 也一样——内核异常的原文可能含文件路径、配置片段。原文进日志，响应只给一句安全的说明。
+ * <p>
+ * <b>每一条都必须显式映射</b>：{@code CommandNotAllowedException} 早先漏了一条，于是「这个命令不该由
+ * 终端用户执行」这种<b>客户端错误</b>落进了兜底的 500——调用方看到 500 会以为服务端坏了、去重试，
+ * 而正确的动作是换一条请求。状态码在这里不只是分类，它决定了客户端接下来做什么。
+ * <p>
+ * <b>「这个用户跑太多」与「服务端没容量了」是两个码，不合并</b>：前者是 429（按用户计，客户端退避重试
+ * 即可），后者是内核外壳的 503 {@code TOO_MANY_STREAMS}（进程级 {@code maxStreams} 用满，
+ * 该做的是扩容或降并发）。把它们统一成一个码，会把「你等等」和「服务端撑不住」混成同一件事。
  *
  * @author zcd
  */
@@ -50,6 +59,8 @@ public class ApiExceptionHandler {
      * <p>
      * 429 而不是 403：这是「现在不行、等会儿行」，客户端按 429 重试是对的。
      * 门面是**立即拒绝**而不是排队，因此不会出现「请求卡住直到额度腾出来」的假死现象。
+     * <p>
+     * 与内核外壳「进程级流许可用满」的 503 是两回事，见类注释。
      *
      * @return 429
      */
@@ -57,6 +68,20 @@ public class ApiExceptionHandler {
     public ResponseEntity<ApiError> onQuotaExceeded() {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .body(new ApiError("该用户的并发对话已达上限，请等上一轮结束后重试"));
+    }
+
+    /**
+     * 命令被本层拒绝。
+     * <p>
+     * 403 与内核外壳一致（{@code ServerCommandGate} 同样回 403 {@code COMMAND_NOT_ALLOWED}）：
+     * 命令本身是合法的，是<b>这一层</b>不允许终端用户执行它（它会改进程级状态、或按参数操作别人的会话，
+     * 那些理由写在 {@link CommandNotAllowedException} 的 javadoc 里）。
+     *
+     * @return 403
+     */
+    @ExceptionHandler(CommandNotAllowedException.class)
+    public ResponseEntity<ApiError> onCommandNotAllowed(CommandNotAllowedException e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ApiError(e.getMessage()));
     }
 
     /**

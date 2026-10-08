@@ -95,6 +95,11 @@ curl -N $H "http://localhost:8080/api/sessions/$SID/chat/stream?message=写一�
 接口里没有任何身份参数：身份来自 `CurrentUser`（示例实现读 `X-User-Id` 请求头，缺省 `demo`）。
 把身份做成参数就等于**把归属校验交给调用方**。
 
+**「同步」指的是接口形状，不是服务端的阻塞方式**：`/chat` 返回 `DeferredResult`，容器线程在提交回合之后
+立刻释放，结果由回合的终态事件填上。客户端看到的行为与「阻塞等 5 分钟」完全一样，区别只在服务端——
+阻塞写法下，一个在途请求会占住一个容器线程最长 5 分钟（Tomcat 缺省 200 个线程，
+两百个这样的请求就把 `/health` 之类短请求排到队尾了）。
+
 两处返回值需要留意的语义：
 
 - **`kind` 才是回合的结论**：`COMPLETED`（正常答完）/ `CANCELLED`（被取消）/ `ERROR`（异常终止）/
@@ -102,6 +107,10 @@ curl -N $H "http://localhost:8080/api/sessions/$SID/chat/stream?message=写一�
   是两件事，混在一个状态码里会让客户端分不清该重试还是该改参数。
 - **`notice` 不是正文**：它是内核对这次收敛的补充说明（「正文被输出上限截断」「模型没返回任何内容」），
   前端要另起一行展示，不要拼进 `reply`。
+- **`kind=HANDLED_INPUT` 表示「插件把这条输入接过去了」**：那次请求压根没有回合，`reply` 为空、
+  `notice` 是接管者的说明，HTTP 仍是 200（内核外壳对同一情形也是回一个正常的 JSON 体）。
+  流式接口**表达不了**这个结果（它的协议是「一直推到终态帧」，没有回合就没有终态帧），
+  因此那边遇到它会明确回 409 并指向同步接口。
 
 失败时的状态码（`ApiExceptionHandler`）：
 
@@ -110,8 +119,13 @@ curl -N $H "http://localhost:8080/api/sessions/$SID/chat/stream?message=写一�
 | 会话不存在，**或不属于该用户** | 404 | 两种情况答复完全相同：区分开来等于给了调用方枚举别人会话 id 的工具 |
 | 该用户并发对话已达上限 | 429 | 门面**立即拒绝**，不排队（排队会把容器线程一起堵住） |
 | 同一会话已有在途回合 | 409 | 先 `cancel` 再提问 |
+| 命令被本层拒绝 | 403 | 与内核外壳一致（`ServerCommandGate` 同样是 403 `COMMAND_NOT_ALLOWED`）；理由见 `CommandNotAllowedException` |
 | `message` 为空 | 400 | |
 | 内核异常 | 500 | 正文只有一句安全说明，原文进服务端日志 |
+
+**429 与内核外壳的 503 `TOO_MANY_STREAMS` 是两个码，刻意不合并**：前者是「你自己跑太多」，
+客户端退避重试即可；后者是「服务端进程级 `maxStreams` 用满了」，该做的是扩容或降并发。
+统一成一个码会把「你等等」和「服务端撑不住」混成同一件事。
 
 ## 代码导览
 
@@ -119,9 +133,9 @@ curl -N $H "http://localhost:8080/api/sessions/$SID/chat/stream?message=写一�
 src/main/java/zcd/jellyfish/template/
 ├── TemplateApplication.java     # 启动类：一句「接 Jellyfish」的代码都没有，全靠 starter 的自动配置
 ├── ChatController.java          # ★ 三个接口。业务侧的写法示范
-├── TurnCollector.java           # 把回合事件聚合成完整回答（同步接口用）
+├── TurnCollector.java           # 把回合事件聚合成完整回答（同步接口用；收到终态时回调交付）
 ├── SseTurnStream.java           # ★ 把回合事件推成 SSE 流（唯一有并发技巧的地方）
-├── ApiExceptionHandler.java     # 异常 → HTTP 状态码
+├── ApiExceptionHandler.java     # 异常 → HTTP 状态码（每条异常都要显式映射，漏了就是 500）
 └── api/                         # 请求 / 响应 DTO（ChatRequest、ChatReply、SessionCreated、SseFrame、ApiError）
 ```
 
@@ -210,6 +224,15 @@ java -jar target/jellyfish-spring-template-0.1.1.jar   # 跑打好的包
 `TemplateSmokeTest` 是**启动验证**：真 Web 容器 + 真内核 + 真 HTTP，验的是与模型无关、但一改就静默
 坏掉的东西——内核起得来没、classpath 上的示例配置真的被读进来没、三个路由都注册没、越权访问是否一律
 404。它**刻意不调模型**（那要花钱、要联网、还不稳定），因此「真调模型」这一步得你自己带 key 跑一次。
+
+另外三个用例各守一类容易被改坏的东西，都不需要 key：
+
+| 用例 | 守什么 |
+| --- | --- |
+| `ApiExceptionMappingTest` | 每条异常**真的被路由**到对应的状态码（漏一条就会落进 500，而 500 会让调用方去重试一个本来就错的请求），以及兜底 500 的正文不带出服务端细节 |
+| `ChatControllerTest` | 同步接口的三条收尾路径：超时那一刻刚好收敛的回合不该被取消、正常交付之后的完成回调不该被当成「客户端跑了」、不同的「没起回合」落点各回各的码 |
+| `TurnCollectorTest` | 聚合语义（正文取增量拼接、回合标识从事件里取）与「终态回调恰好一次」 |
+| `SseTurnStreamTest` / `SseDisconnectTest` | 流的断开发现：前者用 mock 验「容器通知时我们做了什么」，后者用真容器 + 裸 socket 验「安静期里挂断真的会被发现」 |
 
 ## License
 
