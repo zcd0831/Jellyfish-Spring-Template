@@ -56,6 +56,8 @@ src/main/resources/
 └── jellyfish/{models,agents,jellyfish}.json + brief.md   # 仍是内核格式的内容（提示词是 {agentId}.md）
 
 src/test/java/zcd/jellyfish/template/TemplateSmokeTest.java   # 启动验证（真容器 + 真内核 + 真 HTTP）
+src/test/java/zcd/jellyfish/template/SseTurnStreamTest.java    # 流写与断开发现（mock 掉 emitter 的单元测试）
+src/test/java/zcd/jellyfish/template/SseDisconnectTest.java    # 安静期断开的端到端验证（真容器 + 裸 socket）
 ```
 
 ## 关键不变量
@@ -71,6 +73,11 @@ src/test/java/zcd/jellyfish/template/TemplateSmokeTest.java   # 启动验证（�
 - **SSE 队列有界、终态帧不走队列**：无界队列会被慢客户端吃光内存；终态帧一旦被丢掉，
   客户端就永远等不到结尾、连接永不 complete。
 - **客户端断开 / 同步等待超时要放行内核**：要取消那个回合，否则模型继续烧 token 而没有去处。
+- **断开不能只靠「下一次写失败」发现**：模型在长调用或等审批时一帧都不产生，那次写可能几分钟都不来。
+  因此除了注册 `onCompletion` / `onError` / `onTimeout`，还要有周期性心跳帧（写才会定期发生）。
+  **实测过：安静期里挂断，容器不会主动通知**（`SseDisconnectTest` 把心跳调成 1 小时就会红）。
+- **正常收尾与「客户端没了」必须分得开**：`emitter.complete()` 会同步触发完成回调，
+  认错了会把一个刚答完的回合取消掉。因此先置 `finished` 再完成，且「放行」只允许发生一次。
 - **HTTP 200 ≠ 回合成功**：终态在响应体 / 终态帧的 `kind` 里（`COMPLETED` / `CANCELLED` / `ERROR` /
   `BLOCKED`）；`notice` 是内核的补充说明，不是正文，不要拼进 `reply`。
 - **配置分工不变**：yml 只回答「文件在哪」（四份配置文件路径 + 插件扫描目录），内容仍是内核格式的 JSON。
@@ -102,6 +109,8 @@ src/test/java/zcd/jellyfish/template/TemplateSmokeTest.java   # 启动验证（�
 - **不联网、不调模型、不访问 `~/.jellyfish`**（插件目录指到 JUnit 临时目录）。
 - 启动验证用 `@SpringBootTest(webEnvironment = RANDOM_PORT)` + `TestRestTemplate`：真 Web 容器、真内核、
   真 HTTP，只打不花钱的路径（建会话、参数校验、越权、路由注册）。
+- **涉及容器行为的地方就用真容器 + 裸 socket**（见 `SseDisconnectTest`）：mock 掉容器等于把被测的性质抽走。
+  需要用短心跳时走 `SseTurnStream` 的包私有构造器，别去改产品里的常量。
 - 用例要能重复跑、互相独立、不依赖执行顺序（同一个上下文里跑，注意别让共享的内核状态互相干扰）。
 
 ## Git 约定
