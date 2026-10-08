@@ -18,12 +18,14 @@
 
 - **不是成品聊天服务**。三个接口演示的是「怎么把一个内核回合开在 HTTP 上」，没有登录、没有限流、
   没有历史消息接口、没有前端页面。要做成产品，缺的东西在 starter 与现实世界里都能找到。
-- **`userId` 是示例的简化**。接口里带 `userId` 参数是为了让你一眼看到「内核没有用户这一维、
-  护栏都在门面里」这件事。接进真实业务时，它必须换成从登录态里取出来的当前用户——
-  **永远不要接受客户端自己声称的 userId**，那等于把归属校验交给调用方。
-- **`agentId` 同样不做授权**。`POST /api/sessions?agentId=…` 只是把 agentId 交给内核（只校验它存在），
-  **不问「这个用户能不能用它」**。接进真实业务时这条要自己把关：建一个绑着权限更宽 agent 的会话，
-  等于绕过该用户原有的权限收窄。
+- **身份来自一个可替换的 Bean，接口里没有身份参数**。控制器从 `CurrentUser` 取「这次请求是谁」，
+  示例实现（`HeaderCurrentUser`）读请求头 `X-User-Id`、缺省 `demo`。**它同样是客户端自报，不是认证**
+  ——换一个头就能读到别人的会话。之所以做成 Bean 而不是参数，是为了让「身份从哪来」只有一处，
+  接进真实业务时只换它一个（`@Bean CurrentUser`，示例那份带 `@ConditionalOnMissingBean` 会自动让位）：
+  例如从 `SecurityContextHolder` 或网关校验过的令牌里取。
+- **建会话不收 `agentId`**。用哪个 agent 是**授权决策**（谁能用权限更宽的那个），不是请求参数——
+  客户端自选等于用请求里的一句话绕开该用户原有的权限收窄。示例只用内核的默认 agent；
+  真实业务要按用户/租户挑，再调 `JellyfishUserFacade.createSession(userId, agentId, provider, model)`。
 - **一个插件都没启用**。纯对话，模型没有任何工具。装插件见下文「加能力」。
 
 ## 环境要求
@@ -55,19 +57,22 @@ mvn spring-boot:run          # 监听 8080，内核随容器一起启动
 另开一个终端，依次跑这三条：
 
 ```bash
+# 身份示例：本示例读请求头 X-User-Id，缺省就是 demo。真实业务里换成登录态，见「它不是什么」
+H='-H X-User-Id: demo'
+
 # ① 建会话：返回的 sessionId 就是后面要用的那个
-curl -s -X POST 'http://localhost:8080/api/sessions?userId=demo'
+curl -s $H -X POST 'http://localhost:8080/api/sessions'
 # {"sessionId":"5f0d…"}
 
 # ② 同步提问：等回合结束，一次性拿到完整回答
 SID=上面那个 sessionId
-curl -s -X POST "http://localhost:8080/api/sessions/$SID/chat?userId=demo" \
+curl -s $H -X POST "http://localhost:8080/api/sessions/$SID/chat" \
      -H 'Content-Type: application/json' \
      -d '{"message":"用一句话介绍你自己"}'
 # {"sessionId":"…","turnId":"…","reply":"…","notice":null,"kind":"COMPLETED","reason":null,"rounds":1}
 
 # ③ 流式提问：逐帧推过程与结果，收到终态帧即流结束
-curl -N "http://localhost:8080/api/sessions/$SID/chat/stream?userId=demo&message=写一句诗"
+curl -N $H "http://localhost:8080/api/sessions/$SID/chat/stream?message=写一句诗"
 # data:{"kind":"STARTED"}
 # data:{"kind":"TEXT","text":"床"}
 # data:{"kind":"TEXT","text":"前"}
@@ -83,9 +88,12 @@ curl -N "http://localhost:8080/api/sessions/$SID/chat/stream?userId=demo&message
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/api/sessions?userId=&agentId=` | 建会话，返回 `{"sessionId":…}`；`agentId` 可选，不传就用内核默认 agent |
-| POST | `/api/sessions/{sid}/chat?userId=` | 同步提问，body `{"message":"…"}`，等回合结束返回 `ChatReply` |
-| GET | `/api/sessions/{sid}/chat/stream?userId=&message=` | SSE 流式提问，每帧 `data` 是一段 JSON（字段见 `SseFrame`） |
+| POST | `/api/sessions` | 建会话，返回 `{"sessionId":…}`；归属者是 `CurrentUser` 给出的那个（示例读 `X-User-Id` 头），agent 用内核默认的 |
+| POST | `/api/sessions/{sid}/chat` | 同步提问，body `{"message":"…"}`，等回合结束返回 `ChatReply` |
+| GET | `/api/sessions/{sid}/chat/stream?message=` | SSE 流式提问，每帧 `data` 是一段 JSON（字段见 `SseFrame`） |
+
+接口里没有任何身份参数：身份来自 `CurrentUser`（示例实现读 `X-User-Id` 请求头，缺省 `demo`）。
+把身份做成参数就等于**把归属校验交给调用方**。
 
 两处返回值需要留意的语义：
 
@@ -161,8 +169,10 @@ jellyfish:
 占位符。注意 `${VAR}` 缺失会让**整份配置加载失败、应用起不来**；想容错就写 `${VAR:-默认值}`——
 本示例对 `DEEPSEEK_API_KEY` 用的就是后者，所以不设 key 也能启动。
 
-**agent 的提示词不在 `agents.json` 里**，而是同目录的 `{agentId}.md`
-（本示例是 `classpath:jellyfish/brief.md`）。这就是 `agentId=brief` 与不传的默认 agent 的差别。
+**agent 的提示词不在 `agents.json` 里**，而是同目录的 `{agentId}.md`（本示例是 `classpath:jellyfish/brief.md`）。
+本示例建会话时只用内核的默认 agent；想换默认 agent（例如让它用 `brief` 的那套提示词），改
+`classpath:jellyfish/agents.json` 里的默认 agent 指向即可，**不要把它做成请求参数**：用哪个 agent 是授权决策，
+见上文「它不是什么」。
 
 ## 加能力：装插件
 

@@ -10,7 +10,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -85,9 +87,9 @@ class TemplateSmokeTest {
         assertNotNull(models.findModel("deepseek", "deepseek-chat"), "示例 models.json 的模型应当被读进来");
         assertNotNull(models.resolveDefault(), "默认模型应当解析得出来");
 
-        // 接口：建会话
-        ResponseEntity<SessionCreated> created =
-                rest.postForEntity("/api/sessions?userId=smoke", null, SessionCreated.class);
+        // 接口：建会话（身份来自请求头，见 HeaderCurrentUser）
+        ResponseEntity<SessionCreated> created = rest.postForEntity("/api/sessions", as("smoke"),
+                SessionCreated.class);
         assertThat(created.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(created.getBody()).isNotNull();
         assertThat(created.getBody().getSessionId()).isNotBlank();
@@ -102,16 +104,17 @@ class TemplateSmokeTest {
     @DisplayName("门面护栏生效：访问别人的会话一律 404，与「会话不存在」同一个答复")
     void chat_should_answerNotFound_whenSessionBelongsToAnotherUser() {
         // Given：alice 的会话
-        String sessionId = rest.postForEntity("/api/sessions?userId=alice", null, SessionCreated.class)
+        String sessionId = rest.postForEntity("/api/sessions", as("alice"), SessionCreated.class)
                 .getBody().getSessionId();
+        HttpEntity<Map<String, String>> ask = as("bob", Collections.singletonMap("message", "你好"));
 
         // When：bob 拿这个 id 提问
-        ResponseEntity<String> borrowed = rest.postForEntity("/api/sessions/" + sessionId + "/chat?userId=bob",
-                new HttpEntity<Map<String, String>>(Collections.singletonMap("message", "你好")), String.class);
+        ResponseEntity<String> borrowed = rest.postForEntity("/api/sessions/" + sessionId + "/chat", ask,
+                String.class);
 
         // Then：404，且与「这个 id 根本不存在」答复相同——不给调用方枚举会话 id 的机会
-        ResponseEntity<String> unknown = rest.postForEntity("/api/sessions/no-such-session/chat?userId=bob",
-                new HttpEntity<Map<String, String>>(Collections.singletonMap("message", "你好")), String.class);
+        ResponseEntity<String> unknown = rest.postForEntity("/api/sessions/no-such-session/chat", ask,
+                String.class);
         assertThat(borrowed.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(borrowed.getBody()).isEqualTo(unknown.getBody());
     }
@@ -119,13 +122,51 @@ class TemplateSmokeTest {
     @Test
     @DisplayName("参数校验：message 为空当场 400（也就是说 chat 路由确实被解析到了）")
     void chat_should_rejectBlankMessage_whenMessageMissing() {
-        String sessionId = rest.postForEntity("/api/sessions?userId=smoke", null, SessionCreated.class)
+        String sessionId = rest.postForEntity("/api/sessions", as("smoke"), SessionCreated.class)
                 .getBody().getSessionId();
 
-        ResponseEntity<String> blank = rest.postForEntity("/api/sessions/" + sessionId + "/chat?userId=smoke",
-                new HttpEntity<Map<String, String>>(Collections.singletonMap("message", "   ")), String.class);
+        ResponseEntity<String> blank = rest.postForEntity("/api/sessions/" + sessionId + "/chat",
+                as("smoke", Collections.singletonMap("message", "   ")), String.class);
 
         assertThat(blank.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    /**
+     * 构造一个「以某个身份发起」的请求体（只有请求头）。
+     * <p>
+     * 身份走请求头是本示例的替身实现（{@link HeaderCurrentUser}）：控制器里没有身份参数，
+     * 换掉那个 Bean 就换成登录态。这里用不同身份发请求，正是为了验「alice 的会话 bob 拿不到」。
+     *
+     * @param userId 身份标识
+     * @return 空请求体
+     */
+    private static HttpEntity<Void> as(String userId) {
+        return new HttpEntity<Void>(headersOf(userId));
+    }
+
+    /**
+     * 构造一个「以某个身份发起」的请求体。
+     *
+     * @param userId 身份标识
+     * @param body   请求体
+     * @param <T>    请求体类型
+     * @return 请求体
+     */
+    private static <T> HttpEntity<T> as(String userId, T body) {
+        return new HttpEntity<T>(body, headersOf(userId));
+    }
+
+    /**
+     * 构造带身份头的请求头。
+     *
+     * @param userId 身份标识
+     * @return 请求头
+     */
+    private static HttpHeaders headersOf(String userId) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HeaderCurrentUser.USER_HEADER, userId);
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return headers;
     }
 
     @Test

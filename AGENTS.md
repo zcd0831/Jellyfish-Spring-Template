@@ -42,7 +42,10 @@ mvn spring-boot:run                          # 真的起一个（监听 8080）
 ```
 src/main/java/zcd/jellyfish/template/
 ├── TemplateApplication.java        # 启动类：没有一句「接 Jellyfish」的代码，靠 starter 的自动配置
-├── ChatController.java             # ★ 三个接口（建会话 / 同步提问 / SSE 流式提问）
+├── ChatController.java             # ★ 三个接口（建会话 / 同步提问 / SSE 流式提问），无身份参数
+├── CurrentUser.java                # ★ 「这次请求是谁」的唯一出处（生产替换这个 Bean）
+├── CurrentUserConfiguration.java   # 示例实现 @ConditionalOnMissingBean：接入方声明自己的就顶掉它
+├── HeaderCurrentUser.java          # 示例实现：读请求头 X-User-Id，缺省 demo（不是认证）
 ├── TurnCollector.java              # 回合事件 → 完整回答（同步接口用）
 ├── SseTurnStream.java              # ★ 回合事件 → SSE 帧（本仓库唯一有并发技巧的地方）
 ├── ApiExceptionHandler.java        # 异常 → HTTP 状态码
@@ -57,8 +60,10 @@ src/test/java/zcd/jellyfish/template/TemplateSmokeTest.java   # 启动验证（�
 
 ## 关键不变量
 
-- **`userId` 只来自登录态，永不接受客户端自称**。示例里它是查询参数（没有登录体系），
-  README 必须继续写明「接进真实业务要换成从登录态取」。
+- **`userId` 只来自登录态，永不接受客户端自称**。示例里它来自 `CurrentUser` Bean
+  （`HeaderCurrentUser` 读 `X-User-Id` 头，同样是自报），**接口里没有任何身份参数**；
+  README 必须继续写明「接进真实业务要换掉这一个 Bean」。**别为了省事把 userId 加回接口参数**——
+  那等于把归属校验交给调用方。
 - **「不存在」与「不是你的」必须回同一个答复**（404，同为 `SessionAccessDeniedException`）。
   区分开来等于给了调用方一个枚举别人会话 id 的工具。
 - **listener 里不做 I/O**：它在内核线程（`react` / `llm-stream` / 工具输出泵）上被调用，会并发。

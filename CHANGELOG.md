@@ -9,6 +9,11 @@
 
 ### Changed
 
+- **接口不再收身份参数**（破坏性）：`POST /api/sessions`、`.../chat`、`.../chat/stream` 去掉了
+  `userId`（以及建会话的 `agentId`）。身份改由 `CurrentUser` Bean 给出（示例实现 `HeaderCurrentUser`
+  读请求头 `X-User-Id`，缺省 `demo`），替换它只需声明一个自己的 `CurrentUser`
+  ——示例那份带 `@ConditionalOnMissingBean`，会自动让位。理由：身份做成请求参数等于把归属校验交给
+  调用方；`agentId` 自选则等于用请求里的一句话绕开该用户原有的权限收窄。
 - Maven 坐标由 `zcd` 改为 `io.github.zcd0831`，版本号 0.1.1；内核与 starter 由本地仓库依赖改为从
   Maven Central 解析（`jellyfish.version` 0.1.1），只在本地改了内核时才需要先 `install`。
 

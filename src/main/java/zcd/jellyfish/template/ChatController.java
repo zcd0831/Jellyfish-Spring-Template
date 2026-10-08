@@ -27,9 +27,13 @@ import java.util.concurrent.TimeUnit;
  * 这一维（会话无归属字段、命令域能操作任意会话、审批与提问通道不校验调用方说的会话是不是自己的），
  * 那些护栏全都在门面里。绕过门面 = 绕过全部护栏。
  * <p>
- * <b>每个方法都以 {@code userId} 开头</b>（这里是它的 HTTP 形态）：示例没有登录体系，缺省成同一个
- * {@code demo} 用户；接进真实业务时，换成从会话 / 令牌里取当前用户，并且<b>永远不接受客户端自己声称的
- * userId</b>——那等于把归属校验交给调用方。
+ * <b>接口里没有身份参数</b>：每个方法都从 {@link CurrentUser} 取「这次请求是谁」——把它做成请求参数
+ * 或请求头就等于<b>把归属校验交给调用方</b>（换一个自报的标识就能读别人的会话）。示例实现读
+ * {@code X-User-Id} 头，替换它只需要声明一个自己的 {@link CurrentUser} Bean。
+ * <p>
+ * <b>建会话也不收 agentId</b>：用哪个 agent 是<b>授权决策</b>（谁能用权限更宽的那个），不是请求参数——
+ * 让客户端自选等于用请求里的一句话绕开本用户原有的权限收窄。示例只用内核的默认 agent；
+ * 真实业务里按用户/租户挑，再传 {@code JellyfishUserFacade.createSession(userId, agentId, ...)}。
  * <p>
  * 接口只有三个是刻意的：starter 不提供任何 HTTP 接口，这里演示的是「怎么把一个内核回合开在 HTTP 上」，
  * 而不是一个成品聊天服务。会话列表、历史快照、审批、提问这些入口在
@@ -41,43 +45,38 @@ import java.util.concurrent.TimeUnit;
 @RequestMapping("/api/sessions")
 public class ChatController {
 
-    /** 缺省用户标识，见类注释。 */
-    private static final String DEFAULT_USER = "demo";
-
     /** 同步接口最多等多久。 */
     private static final long SYNC_TURN_TIMEOUT_MILLIS = TimeUnit.MINUTES.toMillis(5);
 
     /** 门面：业务侧与内核之间的唯一入口。 */
     private final JellyfishUserFacade jellyfish;
 
+    /** 身份来源：这次请求是谁。 */
+    private final CurrentUser currentUser;
+
     /**
      * 构造控制器。
      *
-     * @param jellyfish 用户门面，由 starter 装配，不可为 {@code null}
+     * @param jellyfish   用户门面，由 starter 装配，不可为 {@code null}
+     * @param currentUser 身份来源，由本示例装配（可被接入方替换），不可为 {@code null}
      */
-    public ChatController(JellyfishUserFacade jellyfish) {
+    public ChatController(JellyfishUserFacade jellyfish, CurrentUser currentUser) {
         this.jellyfish = jellyfish;
+        this.currentUser = currentUser;
     }
 
     /**
      * 建一个会话。
      * <p>
-     * 会话建好后就绑在这个 {@code userId} 上，之后每次访问都会先校验归属。
-     * <p>
-     * <b>示例里 {@code userId} 与 {@code agentId} 都不做授权</b>：前者是客户端自报的（真实业务必须
-     * 从登录态取，见类注释），后者也只是原样交给内核——门面只校验「这个 agent 存在」，不问「这个用户
-     * 能不能用它」。接进真实业务时，后者同样要自己把关：用一个权限更宽的 agent 建会话，
-     * 等于绕过本用户原有的权限收窄。
+     * 会话建好后就绑在 {@link CurrentUser} 给出的这个用户上，之后每次访问都会先校验归属。
      *
-     * @param userId  归属者标识，缺省 {@code demo}（示例简化，真实业务从登录态取）
-     * @param agentId 用哪个 agent，缺省 {@code null} 表示跟随内核的默认 agent；示例不校验用户能否用它
      * @return 新会话标识
      */
     @PostMapping
-    public SessionCreated create(@RequestParam(defaultValue = DEFAULT_USER) String userId,
-                                 @RequestParam(required = false) String agentId) {
+    public SessionCreated create() {
+        String userId = currentUser.userId();
         SessionCreated created = new SessionCreated();
-        created.setSessionId(jellyfish.createSession(userId, agentId, null, null));
+        created.setSessionId(jellyfish.createSession(userId));
         return created;
     }
 
@@ -92,15 +91,13 @@ public class ChatController {
      * 时 {@code reply} 可能为空，看 {@code reason}。之所以不用 HTTP 状态码表达它：
      * 「请求成功、回合失败」与「请求根本没受理」是两件事，混在一起会让客户端分不清该重试还是该改参数。
      *
-     * @param userId    请求者标识，缺省 {@code demo}
      * @param sessionId 会话标识
      * @param request   请求体，{@code message} 为本次提问
      * @return 回合结果
      */
     @PostMapping("/{sessionId}/chat")
-    public ChatReply chat(@RequestParam(defaultValue = DEFAULT_USER) String userId,
-                          @PathVariable String sessionId,
-                          @RequestBody ChatRequest request) {
+    public ChatReply chat(@PathVariable String sessionId, @RequestBody ChatRequest request) {
+        String userId = currentUser.userId();
         String message = requireMessage(request);
         TurnCollector collector = new TurnCollector();
         Submission submission = jellyfish.chat(userId, sessionId, message, collector);
@@ -130,15 +127,13 @@ public class ChatController {
      * 每帧的 {@code data} 是一段 JSON（字段见 {@code SseFrame}），收到终态帧即流结束。
      * 前端用 {@code EventSource} 就能读，不需要额外的协议。
      *
-     * @param userId    请求者标识，缺省 {@code demo}
      * @param sessionId 会话标识
      * @param message   本次提问
      * @return SSE 响应
      */
     @GetMapping(value = "/{sessionId}/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter stream(@RequestParam(defaultValue = DEFAULT_USER) String userId,
-                             @PathVariable String sessionId,
-                             @RequestParam String message) {
+    public SseEmitter stream(@PathVariable String sessionId, @RequestParam String message) {
+        String userId = currentUser.userId();
         if (message.trim().isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "message 不能为空");
         }
