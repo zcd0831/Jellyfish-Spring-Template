@@ -5,7 +5,7 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [0.1.1] - 2026-10-10
 
 ### Changed
 
@@ -16,6 +16,14 @@
   调用方；`agentId` 自选则等于用请求里的一句话绕开该用户原有的权限收窄。
 - Maven 坐标由 `zcd` 改为 `io.github.zcd0831`，版本号 0.1.1；内核与 starter 由本地仓库依赖改为从
   Maven Central 解析（`jellyfish.version` 0.1.1），只在本地改了内核时才需要先 `install`。
+- **HTTP 状态码各归各位**：`CommandNotAllowedException` 此前没有映射、落兜底 `500`，现在回 `403`
+  （与内核的 `COMMAND_NOT_ALLOWED` 对齐）；同步接口的收尾状态细分（`NO_SESSION` → `404`、
+  `BLANK_INPUT` → `400`、`HANDLED_INPUT` → `200`），流式接口对 `HANDLED_INPUT` 回 `409` 并指向
+  同步接口。依赖旧状态码的调用方要复核。
+- **同步接口不再占着容器线程等 5 分钟**：`POST /api/sessions/{id}/chat` 改为 `DeferredResult`，
+  容器线程提交回合后立即释放，结果由终态事件填入（接口形状不变）；超时前先查一次终态再决定是否取消。
+- **SSE 流每 15 秒发一个 `:keep-alive` 注释帧，安静期里客户端断开也能被发现**：此前只靠「下一次写」
+  发现断连，而实测容器在安静期不会通知回调。注释帧被 `EventSource` 忽略，前端无需改动。
 
 ## [0.1.0] - 2026-10-07
 
@@ -32,5 +40,6 @@
 - 越权护栏：`userId` 只来自登录态（示例里是查询参数，接进真实业务要换成从登录态取）；
   「不存在」与「不是你的」回同一个 404，不给调用方枚举别人会话 id 的途径。
 
-[Unreleased]: https://github.com/zcd0831/Jellyfish-Spring-Template/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/zcd0831/Jellyfish-Spring-Template/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/zcd0831/Jellyfish-Spring-Template/releases/tag/v0.1.1
 [0.1.0]: https://github.com/zcd0831/Jellyfish-Spring-Template/releases/tag/v0.1.0
