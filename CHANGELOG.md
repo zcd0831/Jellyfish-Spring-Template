@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-11
+
+### Changed
+
+- 版本号对齐到 `0.1.2`：本示例依赖的内核与 starter 同步到 `0.1.2`。本版示例没有行为变更。
+
 ## [0.1.1] - 2026-10-11
 
 ### Changed
@@ -45,6 +51,7 @@
 - 越权护栏：`userId` 只来自登录态（示例里是查询参数，接进真实业务要换成从登录态取）；
   「不存在」与「不是你的」回同一个 404，不给调用方枚举别人会话 id 的途径。
 
-[Unreleased]: https://github.com/zcd0831/Jellyfish-Spring-Template/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/zcd0831/Jellyfish-Spring-Template/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/zcd0831/Jellyfish-Spring-Template/releases/tag/v0.1.2
 [0.1.1]: https://github.com/zcd0831/Jellyfish-Spring-Template/releases/tag/v0.1.1
 [0.1.0]: https://github.com/zcd0831/Jellyfish-Spring-Template/releases/tag/v0.1.0
